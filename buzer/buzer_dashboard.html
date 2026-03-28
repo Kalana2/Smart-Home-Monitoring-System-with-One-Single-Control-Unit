@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>🔔 Buzzer Alert Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --ok:   #4cff91;
+        --low:  #ff4d4d;
+        --blue: #7eb8f7;
+        --card: #1e1e2e;
+        --bg:   #0f0f1a;
+      }
+
+      body {
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: var(--bg);
+        color: #e0e0e0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 30px 16px 60px;
+        gap: 22px;
+      }
+
+      /* ── Nav ── */
+      .nav-bar {
+        width: 100%;
+        max-width: 900px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .nav-bar a {
+        font-size: 0.82rem;
+        color: var(--blue);
+        text-decoration: none;
+        padding: 5px 14px;
+        border: 1px solid var(--blue);
+        border-radius: 20px;
+        transition: background 0.2s;
+      }
+      .nav-bar a:hover { background: #7eb8f722; }
+
+      h1 { font-size: 2rem; color: var(--blue); letter-spacing: 2px; }
+
+      /* ── Connection badge ── */
+      #conn-status {
+        font-size: 0.85rem;
+        padding: 5px 18px;
+        border-radius: 20px;
+        background: var(--card);
+        border: 1px solid #555;
+        transition: color 0.3s, border-color 0.3s;
+      }
+      #conn-status.connected    { color: var(--ok);  border-color: var(--ok); }
+      #conn-status.disconnected { color: var(--low); border-color: var(--low); }
+
+      /* ── Top row ── */
+      .top-row {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        justify-content: center;
+        width: 100%;
+        max-width: 900px;
+      }
+
+      /* ── Alert box ── */
+      .alert-box {
+        flex: 1 1 240px;
+        max-width: 320px;
+        border-radius: 20px;
+        border: 2px solid #2a2a3e;
+        background: var(--card);
+        padding: 36px 24px;
+        text-align: center;
+        transition: border-color 0.4s, box-shadow 0.4s;
+      }
+      .alert-box.ok  { border-color: var(--ok);  box-shadow: 0 0 28px #4cff9155; }
+      .alert-box.low { border-color: var(--low); box-shadow: 0 0 28px #ff4d4d66;
+                       animation: pulse 0.8s infinite alternate; }
+      @keyframes pulse {
+        from { box-shadow: 0 0 18px #ff4d4d55; }
+        to   { box-shadow: 0 0 55px #ff4d4dcc; }
+      }
+      .alert-icon  { font-size: 4rem; line-height: 1.1; }
+      .alert-label { margin-top: 12px; font-size: 1.5rem; font-weight: 700;
+                     letter-spacing: 2px; }
+      .alert-box.ok  .alert-label { color: var(--ok);  }
+      .alert-box.low .alert-label { color: var(--low); }
+      .alert-sub { margin-top: 6px; font-size: 0.78rem; color: #666; }
+
+      /* ── Distance card ── */
+      .dist-card {
+        flex: 1 1 200px;
+        max-width: 260px;
+        border-radius: 20px;
+        border: 2px solid #2a2a3e;
+        background: var(--card);
+        padding: 30px 20px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+      .dist-label { font-size: 0.75rem; color: #888; letter-spacing: 2px;
+                    text-transform: uppercase; }
+      .dist-value { font-size: 3.2rem; font-weight: 800; color: var(--blue);
+                    line-height: 1; transition: color 0.4s; }
+      .dist-value.low { color: var(--low); }
+      .dist-unit  { font-size: 1rem; color: #888; }
+
+      /* ── Tank visual ── */
+      .tank-card {
+        flex: 0 1 150px;
+        border-radius: 20px;
+        border: 2px solid #2a2a3e;
+        background: var(--card);
+        padding: 22px 18px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      .tank-card h2 { font-size: 0.72rem; color: #888; letter-spacing: 2px;
+                      text-transform: uppercase; }
+      .tank-outer {
+        width: 72px; height: 170px;
+        border: 3px solid #4a90d9;
+        border-radius: 6px 6px 12px 12px;
+        position: relative; overflow: hidden;
+        background: #111;
+      }
+      .tank-fill {
+        position: absolute; bottom: 0; width: 100%; height: 0%;
+        background: linear-gradient(to top, #1a6fbf, #4fc3f7);
+        transition: height 0.9s ease, background 0.5s ease;
+      }
+      .tank-fill.low { background: linear-gradient(to top, #bf1a1a, #f77272); }
+      .tank-pct { font-size: 1.1rem; font-weight: 700; color: var(--blue); }
+
+      /* ── Stat strip ── */
+      .stat-strip {
+        display: flex; gap: 14px; flex-wrap: wrap;
+        justify-content: center;
+        width: 100%; max-width: 900px;
+      }
+      .stat-chip {
+        background: var(--card);
+        border: 1px solid #2a2a3e;
+        border-radius: 14px;
+        padding: 14px 22px;
+        min-width: 140px;
+        text-align: center;
+      }
+      .stat-chip .s-label { font-size: 0.7rem; color: #888; letter-spacing: 1px;
+                             text-transform: uppercase; }
+      .stat-chip .s-value { font-size: 1.4rem; font-weight: 700; color: var(--blue);
+                             margin-top: 4px; }
+
+      /* ── Chart card ── */
+      .chart-card {
+        width: 100%; max-width: 900px;
+        background: var(--card);
+        border: 2px solid #2a2a3e;
+        border-radius: 20px;
+        padding: 24px 20px;
+      }
+      .chart-card h2 { font-size: 0.8rem; color: #888; letter-spacing: 2px;
+                       text-transform: uppercase; margin-bottom: 14px; }
+
+      /* ── Alert log ── */
+      .log-card {
+        width: 100%; max-width: 900px;
+        background: var(--card);
+        border: 2px solid #2a2a3e;
+        border-radius: 20px;
+        padding: 24px 20px;
+      }
+      .log-card h2 { font-size: 0.8rem; color: #888; letter-spacing: 2px;
+                     text-transform: uppercase; margin-bottom: 12px; }
+      #log-list {
+        list-style: none; max-height: 220px; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      #log-list li {
+        display: flex; align-items: center; gap: 10px;
+        background: #161625; border-radius: 10px;
+        padding: 8px 14px; font-size: 0.82rem;
+      }
+      #log-list li .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+      #log-list li.log-low .dot { background: var(--low); }
+      #log-list li.log-ok  .dot { background: var(--ok);  }
+      #log-list li .ts { color: #666; font-size: 0.75rem; margin-left: auto; white-space: nowrap; }
+
+      #log-list::-webkit-scrollbar { width: 4px; }
+      #log-list::-webkit-scrollbar-track { background: #111; }
+      #log-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+      footer { font-size: 0.72rem; color: #444; }
+    </style>
+  </head>
+  <body>
+
+    <!-- Nav -->
+    <div class="nav-bar">
+      <a href="../central_dashboard.html">⬅ Central Dashboard</a>
+      <span style="font-size:0.8rem;color:#555;">MQTT: test.mosquitto.org:8081</span>
+    </div>
+
+    <h1>🔔 Buzzer Alert Dashboard</h1>
+    <div id="conn-status" class="disconnected">⚫ Disconnected</div>
+
+    <!-- Top row -->
+    <div class="top-row">
+
+      <!-- Alert status -->
+      <div class="alert-box" id="alert-box">
+        <div class="alert-icon" id="alert-icon">❓</div>
+        <div class="alert-label" id="alert-label">WAITING</div>
+        <div class="alert-sub">home/watertank/buzzer</div>
+      </div>
+
+      <!-- Distance -->
+      <div class="dist-card">
+        <div class="dist-label">Distance</div>
+        <div class="dist-value" id="dist-value">--</div>
+        <div class="dist-unit">cm</div>
+        <div style="font-size:0.7rem;color:#555;margin-top:4px;">home/watertank/distance</div>
+      </div>
+
+      <!-- Tank visual -->
+      <div class="tank-card">
+        <h2>Tank Level</h2>
+        <div class="tank-outer">
+          <div class="tank-fill" id="tank-fill"></div>
+        </div>
+        <div class="tank-pct" id="tank-pct">--%</div>
+      </div>
+
+    </div>
+
+    <!-- Stat strip -->
+    <div class="stat-strip">
+      <div class="stat-chip">
+        <div class="s-label">Last Distance</div>
+        <div class="s-value" id="stat-last">-- cm</div>
+      </div>
+      <div class="stat-chip">
+        <div class="s-label">Min Distance</div>
+        <div class="s-value" id="stat-min">-- cm</div>
+      </div>
+      <div class="stat-chip">
+        <div class="s-label">Max Distance</div>
+        <div class="s-value" id="stat-max">-- cm</div>
+      </div>
+      <div class="stat-chip">
+        <div class="s-label">Alert Count</div>
+        <div class="s-value" id="stat-alerts">0</div>
+      </div>
+      <div class="stat-chip">
+        <div class="s-label">Messages</div>
+        <div class="s-value" id="stat-msgs">0</div>
+      </div>
+    </div>
+
+    <!-- Distance history chart -->
+    <div class="chart-card">
+      <h2>📈 Distance History (last 40 readings)</h2>
+      <canvas id="distChart" height="100"></canvas>
+    </div>
+
+    <!-- Alert log -->
+    <div class="log-card">
+      <h2>📋 Event Log</h2>
+      <ul id="log-list">
+        <li style="color:#444;font-size:0.8rem;padding:6px 0;">No events yet…</li>
+      </ul>
+    </div>
+
+    <footer>ESP32 Buzzer Node · MQTT: test.mosquitto.org · Topics: home/watertank/*</footer>
+
+    <script>
+      // ── Config ────────────────────────────────────────────────
+      const BROKER     = "wss://test.mosquitto.org:1883";
+      const TOPIC_BUZZ = "home/watertank/buzzer";
+      const TOPIC_DIST = "home/watertank/distance";
+      const TANK_MAX   = 40;   // cm when tank is EMPTY (sensor far from water)
+      const TANK_MIN   = 5;    // cm when tank is FULL
+      const LOW_THRESH = 20;   // must match buzer.ino LOW_THRESHOLD_CM
+
+      // ── State ─────────────────────────────────────────────────
+      let alertCount = 0, msgCount = 0;
+      let minDist = Infinity, maxDist = -Infinity;
+      let lastBuzzer = "";
+
+      // ── Chart ─────────────────────────────────────────────────
+      const distChart = new Chart(
+        document.getElementById("distChart").getContext("2d"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "Distance (cm)",
+              data: [],
+              borderColor: "#7eb8f7",
+              backgroundColor: "rgba(126,184,247,0.07)",
+              borderWidth: 2,
+              pointRadius: 3,
+              pointBackgroundColor: [],
+              tension: 0.4,
+              fill: true,
+            },
+            {
+              label: `Threshold (${LOW_THRESH} cm)`,
+              data: [],
+              borderColor: "#ff4d4d88",
+              borderDash: [6, 4],
+              borderWidth: 1.5,
+              pointRadius: 0,
+              fill: false,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          animation: { duration: 250 },
+          scales: {
+            x: { ticks: { color: "#555", maxTicksLimit: 8 }, grid: { color: "#1e1e2e" } },
+            y: { ticks: { color: "#888" }, grid: { color: "#1e1e2e" },
+                 suggestedMin: 0, suggestedMax: TANK_MAX + 5 }
+          },
+          plugins: { legend: { labels: { color: "#aaa", font: { size: 11 } } } }
+        }
+      });
+
+      // ── Helpers ───────────────────────────────────────────────
+      const ts = () => new Date().toLocaleTimeString();
+
+      function updateTank(dist) {
+        const c   = Math.max(TANK_MIN, Math.min(TANK_MAX, dist));
+        const pct = Math.round(((TANK_MAX - c) / (TANK_MAX - TANK_MIN)) * 100);
+        const fill = document.getElementById("tank-fill");
+        fill.style.height = pct + "%";
+        fill.classList.toggle("low", dist >= LOW_THRESH);
+        document.getElementById("tank-pct").textContent = pct + "%";
+      }
+
+      function addLog(type, msg) {
+        const ul = document.getElementById("log-list");
+        const ph = ul.querySelector("li[style]");
+        if (ph) ph.remove();
+        const li = document.createElement("li");
+        li.className = type === "LOW" ? "log-low" : "log-ok";
+        li.innerHTML = `<span class="dot"></span><span>${msg}</span><span class="ts">${ts()}</span>`;
+        ul.prepend(li);
+        while (ul.children.length > 60) ul.lastElementChild.remove();
+      }
+
+      function pushChart(dist) {
+        const ds = distChart.data;
+        ds.labels.push(ts());
+        ds.datasets[0].data.push(dist);
+        ds.datasets[1].data.push(LOW_THRESH);
+        const colours = ds.datasets[0].data.map(v => v >= LOW_THRESH ? "#ff4d4d" : "#7eb8f7");
+        ds.datasets[0].pointBackgroundColor = colours;
+        if (ds.labels.length > 40) {
+          ds.labels.shift();
+          ds.datasets[0].data.shift();
+          ds.datasets[1].data.shift();
+        }
+        distChart.update();
+      }
+
+      // ── MQTT ──────────────────────────────────────────────────
+      const connEl = document.getElementById("conn-status");
+      const mqttClient = mqtt.connect(BROKER, {
+        clientId: "buzer_dash_" + Math.random().toString(16).slice(2, 8),
+        reconnectPeriod: 3000,
+        keepalive: 30,
+      });
+
+      mqttClient.on("connect", () => {
+        connEl.textContent = "🟢 Connected";
+        connEl.className   = "connected";
+        mqttClient.subscribe(TOPIC_BUZZ);
+        mqttClient.subscribe(TOPIC_DIST);
+        addLog("OK", "🔗 Connected to test.mosquitto.org");
+      });
+      mqttClient.on("offline",  () => { connEl.textContent = "🔴 Disconnected"; connEl.className = "disconnected"; });
+      mqttClient.on("reconnect",() => { connEl.textContent = "🔄 Reconnecting…"; connEl.className = "disconnected"; });
+      mqttClient.on("error", e => console.error("MQTT:", e));
+
+      mqttClient.on("message", (topic, payload) => {
+        const msg = payload.toString().trim();
+        msgCount++;
+        document.getElementById("stat-msgs").textContent = msgCount;
+
+        // ── Buzzer status topic ────────────────────────────────
+        if (topic === TOPIC_BUZZ) {
+          const box   = document.getElementById("alert-box");
+          const icon  = document.getElementById("alert-icon");
+          const label = document.getElementById("alert-label");
+
+          if (msg === "LOW") {
+            box.className     = "alert-box low";
+            icon.textContent  = "🔔";
+            label.textContent = "WATER LOW";
+            if (lastBuzzer !== "LOW") {
+              alertCount++;
+              document.getElementById("stat-alerts").textContent = alertCount;
+              addLog("LOW", "⚠️ Water LOW — buzzer triggered");
+            }
+          } else if (msg === "OK") {
+            box.className     = "alert-box ok";
+            icon.textContent  = "✅";
+            label.textContent = "WATER OK";
+            if (lastBuzzer === "LOW") {
+              addLog("OK", "✅ Water level restored to OK");
+            }
+          }
+          lastBuzzer = msg;
+        }
+
+        // ── Distance mirror topic ──────────────────────────────
+        if (topic === TOPIC_DIST) {
+          const dist = parseFloat(msg);
+          if (isNaN(dist) || dist <= 0) return;
+
+          const dEl = document.getElementById("dist-value");
+          dEl.textContent = dist.toFixed(1);
+          dEl.classList.toggle("low", dist >= LOW_THRESH);
+
+          document.getElementById("stat-last").textContent = dist.toFixed(1) + " cm";
+          if (dist < minDist) { minDist = dist; document.getElementById("stat-min").textContent = dist.toFixed(1) + " cm"; }
+          if (dist > maxDist) { maxDist = dist; document.getElementById("stat-max").textContent = dist.toFixed(1) + " cm"; }
+
+          updateTank(dist);
+          pushChart(dist);
+        }
+      });
+    </script>
+  </body>
+</html>
+        border-color: #4cff91;
+        box-shadow: 0 0 30px rgba(76, 255, 145, 0.15);
+      }
+      .alert-box.low {
+        border-color: #ff5555;
+        box-shadow: 0 0 30px rgba(255, 85, 85, 0.25);
+        animation: alertPulse 1s infinite;
+      }
+      @keyframes alertPulse {
+        0%,
+        100% {
+          box-shadow: 0 0 30px rgba(255, 85, 85, 0.25);
+        }
+        50% {
+          box-shadow: 0 0 55px rgba(255, 85, 85, 0.55);
+        }
+      }
+
+      .alert-icon {
+        font-size: 4rem;
+        margin-bottom: 12px;
+      }
+
+      #alert-title {
+        font-size: 2rem;
+        font-weight: bold;
+        letter-spacing: 2px;
+        margin-bottom: 8px;
+        color: #aaa;
+        transition: color 0.3s;
+      }
+      .alert-box.ok #alert-title {
+        color: #4cff91;
+      }
+      .alert-box.low #alert-title {
+        color: #ff5555;
+      }
+
+      #alert-sub {
+        font-size: 0.9rem;
+        color: #888;
+      }
+
+      /* ── Metric cards ── */
+      .cards {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        justify-content: center;
+      }
+      .card {
+        background: #1e1e2e;
+        border: 1px solid #2a2a3e;
+        border-radius: 14px;
+        padding: 20px 30px;
+        min-width: 150px;
+        text-align: center;
+      }
+      .card .label {
+        font-size: 0.75rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 8px;
+      }
+      .card .value {
+        font-size: 1.8rem;
+        font-weight: bold;
+        color: #7eb8f7;
+      }
+      .card .unit {
+        font-size: 0.8rem;
+        color: #aaa;
+        margin-top: 4px;
+      }
+
+      /* ── Alert history ── */
+      .history-section {
+        width: 100%;
+        max-width: 700px;
+        background: #1e1e2e;
+        border: 1px solid #2a2a3e;
+        border-radius: 14px;
+        padding: 16px;
+      }
+      .history-section h2 {
+        font-size: 0.8rem;
+        color: #888;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      #history {
+        font-family: monospace;
+        font-size: 0.8rem;
+        color: #ccc;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      #history div {
+        padding: 4px 0;
+        border-bottom: 1px solid #2a2a3e;
+        display: flex;
+        gap: 10px;
+      }
+      #history div:last-child {
+        border-bottom: none;
+      }
+      .ts {
+        color: #555;
+        white-space: nowrap;
+      }
+      .tag-low {
+        color: #ff5555;
+        font-weight: bold;
+      }
+      .tag-ok {
+        color: #4cff91;
+      }
+
+      footer {
+        font-size: 0.72rem;
+        color: #444;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="nav-bar">
+      <span style="font-size: 0.8rem; color: #555">buzer node</span>
+      <div style="display: flex; gap: 8px">
+        <a href="../tank/tank_dashboard.html">💧 Tank Dashboard</a>
+        <a href="../central_dashboard.html">🏠 Central Dashboard</a>
+      </div>
+    </div>
+
+    <h1>🔔 Buzzer Alert Monitor</h1>
+    <div id="conn-status" class="disconnected">⚡ Disconnected</div>
+
+    <!-- Big alert indicator -->
+    <div class="alert-box" id="alert-box">
+      <div class="alert-icon" id="alert-icon">💧</div>
+      <div id="alert-title">WAITING…</div>
+      <div id="alert-sub">No data received yet</div>
+    </div>
+
+    <!-- Metric cards -->
+    <div class="cards">
+      <div class="card">
+        <div class="label">Distance</div>
+        <div class="value" id="val-dist">--</div>
+        <div class="unit">cm</div>
+      </div>
+      <div class="card">
+        <div class="label">Threshold</div>
+        <div class="value" id="val-thresh">20</div>
+        <div class="unit">cm</div>
+      </div>
+      <div class="card">
+        <div class="label">Alerts Today</div>
+        <div class="value" id="val-alerts">0</div>
+        <div class="unit">times</div>
+      </div>
+      <div class="card">
+        <div class="label">Last Update</div>
+        <div class="value" style="font-size: 1rem" id="val-time">--</div>
+        <div class="unit">time</div>
+      </div>
+    </div>
+
+    <!-- Alert history -->
+    <div class="history-section">
+      <h2>📋 Alert History</h2>
+      <div id="history"></div>
+    </div>
+
+    <footer>
+      ESP32 Buzzer Node · MQTT: test.mosquitto.org · Topic: home/watertank/level
+    </footer>
+
+    <script>
+      const BROKER = "wss://test.mosquitto.org:8081";
+      const TOPIC = "home/watertank/level";
+      const LOW_THRESHOLD = 20.0; // same as buzer.ino
+      let alertCount = 0;
+      let lastState = null;
+
+      const connEl = document.getElementById("conn-status");
+      const alertBox = document.getElementById("alert-box");
+      const alertIcon = document.getElementById("alert-icon");
+      const alertTitle = document.getElementById("alert-title");
+      const alertSub = document.getElementById("alert-sub");
+
+      // Show threshold value in card
+      document.getElementById("val-thresh").textContent = LOW_THRESHOLD;
+
+      const mqttClient = mqtt.connect(BROKER, {
+        clientId: "web_buzer_" + Math.random().toString(16).slice(2),
+        reconnectPeriod: 4000,
+      });
+
+      mqttClient.on("connect", () => {
+        connEl.textContent = "✅ Connected to test.mosquitto.org";
+        connEl.className = "connected";
+        mqttClient.subscribe(TOPIC);
+        addHistory("Connected & subscribed to " + TOPIC, "ok");
+      });
+
+      mqttClient.on("reconnect", () => {
+        connEl.textContent = "🔄 Reconnecting…";
+        connEl.className = "disconnected";
+      });
+
+      mqttClient.on("error", (e) => {
+        connEl.textContent = "❌ " + e.message;
+        connEl.className = "disconnected";
+      });
+
+      mqttClient.on("close", () => {
+        connEl.textContent = "⚡ Disconnected";
+        connEl.className = "disconnected";
+      });
+
+      mqttClient.on("message", (topic, message) => {
+        const dist = parseFloat(message.toString());
+        if (isNaN(dist) || dist <= 0) return;
+
+        const isLow = dist >= LOW_THRESHOLD;
+        const state = isLow ? "low" : "ok";
+        const time = new Date().toLocaleTimeString();
+
+        document.getElementById("val-dist").textContent = dist.toFixed(2);
+        document.getElementById("val-time").textContent = time;
+
+        // Only log + count when state changes
+        if (state !== lastState) {
+          lastState = state;
+          if (isLow) {
+            alertCount++;
+            document.getElementById("val-alerts").textContent = alertCount;
+            addHistory(
+              `⚠️  LOW — ${dist.toFixed(
+                2
+              )} cm (threshold: ${LOW_THRESHOLD} cm)`,
+              "low"
+            );
+          } else {
+            addHistory(`✅  OK — ${dist.toFixed(2)} cm`, "ok");
+          }
+        }
+
+        // Update big alert box
+        if (isLow) {
+          alertBox.className = "alert-box low";
+          alertIcon.textContent = "🚨";
+          alertTitle.textContent = "WATER LOW!";
+          alertSub.textContent = `Distance: ${dist.toFixed(2)} cm — Buzzer ON`;
+        } else {
+          alertBox.className = "alert-box ok";
+          alertIcon.textContent = "💧";
+          alertTitle.textContent = "WATER OK";
+          alertSub.textContent = `Distance: ${dist.toFixed(2)} cm — Buzzer OFF`;
+        }
+      });
+
+      function addHistory(msg, type) {
+        const box = document.getElementById("history");
+        const div = document.createElement("div");
+        const now = new Date().toLocaleTimeString();
+        div.innerHTML = `<span class="ts">${now}</span><span class="tag-${type}">${msg}</span>`;
+        box.prepend(div);
+        while (box.children.length > 60) box.removeChild(box.lastChild);
+      }
+    </script>
+  </body>
+</html>

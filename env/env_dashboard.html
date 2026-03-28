@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Environment Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: #0f0f1a;
+        color: #e0e0e0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        padding: 40px 20px;
+      }
+
+      h1 {
+        font-size: 2rem;
+        color: #7eb8f7;
+        letter-spacing: 2px;
+        margin-bottom: 8px;
+      }
+      p.subtitle {
+        color: #888;
+        font-size: 0.9rem;
+        margin-bottom: 16px;
+      }
+
+      #conn-status {
+        font-size: 0.85rem;
+        padding: 5px 18px;
+        border-radius: 20px;
+        background: #1e1e2e;
+        border: 1px solid #333;
+        margin-bottom: 36px;
+        transition: all 0.3s;
+      }
+      #conn-status.connected {
+        color: #4cff91;
+        border-color: #4cff91;
+      }
+      #conn-status.disconnected {
+        color: #ff5555;
+        border-color: #ff5555;
+      }
+      #conn-status.connecting {
+        color: #f7c948;
+        border-color: #f7c948;
+      }
+
+      .cards {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-bottom: 40px;
+      }
+
+      .card {
+        background: #1a1a2e;
+        border: 1px solid #2a2a4a;
+        border-radius: 20px;
+        padding: 30px 38px;
+        text-align: center;
+        width: 210px;
+        transition: box-shadow 0.3s;
+      }
+      .card:hover {
+        box-shadow: 0 0 24px rgba(126, 184, 247, 0.15);
+      }
+
+      .card .icon {
+        font-size: 2.8rem;
+        margin-bottom: 12px;
+      }
+      .card .label {
+        font-size: 0.8rem;
+        color: #888;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .card .value {
+        font-size: 2.8rem;
+        font-weight: bold;
+        line-height: 1;
+      }
+      .card .unit {
+        font-size: 1rem;
+        color: #aaa;
+        margin-top: 6px;
+      }
+
+      .gauge-wrap {
+        margin-top: 14px;
+        background: #0f0f1a;
+        border-radius: 10px;
+        height: 8px;
+        overflow: hidden;
+      }
+      .gauge-bar {
+        height: 100%;
+        border-radius: 10px;
+        width: 0%;
+        transition: width 0.8s ease;
+      }
+
+      #temp-value {
+        color: #ff7043;
+      }
+      #hum-value {
+        color: #42a5f5;
+      }
+      #light-value {
+        color: #ffd740;
+      }
+
+      #temp-bar {
+        background: linear-gradient(90deg, #ff7043, #ffd740);
+      }
+      #hum-bar {
+        background: linear-gradient(90deg, #42a5f5, #00e5ff);
+      }
+      #light-bar {
+        background: linear-gradient(90deg, #ffd740, #ffff8d);
+      }
+
+      #daynight-value {
+        font-size: 1.6rem;
+        font-weight: bold;
+        padding: 8px 20px;
+        border-radius: 30px;
+        letter-spacing: 2px;
+        display: inline-block;
+        margin-top: 6px;
+        transition: all 0.5s;
+      }
+      #daynight-value.DAY {
+        background: #2a2a1a;
+        color: #ffd740;
+        border: 1px solid #ffd740;
+      }
+      #daynight-value.NIGHT {
+        background: #1a1a2e;
+        color: #7eb8f7;
+        border: 1px solid #7eb8f7;
+      }
+      #daynight-value.init {
+        background: transparent;
+        color: #555;
+        border: 1px solid #333;
+      }
+
+      #last-update {
+        color: #555;
+        font-size: 0.8rem;
+        margin-bottom: 30px;
+      }
+
+      .log-title {
+        font-size: 0.85rem;
+        color: #7eb8f7;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+        width: 100%;
+        max-width: 560px;
+      }
+
+      #log {
+        width: 100%;
+        max-width: 560px;
+        background: #111120;
+        border: 1px solid #2a2a4a;
+        border-radius: 12px;
+        padding: 14px;
+        font-family: monospace;
+        font-size: 0.8rem;
+        height: 180px;
+        overflow-y: auto;
+        color: #aaa;
+      }
+      #log .entry {
+        padding: 2px 0;
+        border-bottom: 1px solid #1e1e2e;
+      }
+      #log .entry span.time {
+        color: #555;
+        margin-right: 8px;
+      }
+      #log .entry span.temp {
+        color: #ff7043;
+      }
+      #log .entry span.hum {
+        color: #42a5f5;
+      }
+      #log .entry span.light {
+        color: #ffd740;
+      }
+      #log .entry span.dn {
+        color: #b39ddb;
+      }
+      #log .entry span.sys {
+        color: #f7c948;
+      }
+
+      .config {
+        margin-top: 30px;
+        background: #1a1a2e;
+        border: 1px solid #2a2a4a;
+        border-radius: 14px;
+        padding: 20px 28px;
+        width: 100%;
+        max-width: 560px;
+        font-size: 0.85rem;
+      }
+      .config h3 {
+        color: #7eb8f7;
+        margin-bottom: 14px;
+        font-size: 0.9rem;
+        letter-spacing: 1px;
+      }
+      .config label {
+        color: #888;
+        display: block;
+        margin-bottom: 4px;
+      }
+      .config input {
+        width: 100%;
+        background: #0f0f1a;
+        border: 1px solid #333;
+        border-radius: 8px;
+        color: #e0e0e0;
+        padding: 7px 12px;
+        font-size: 0.85rem;
+        margin-bottom: 12px;
+        outline: none;
+      }
+      .config input:focus {
+        border-color: #7eb8f7;
+      }
+      .config button {
+        width: 100%;
+        padding: 9px;
+        background: #7eb8f7;
+        color: #0f0f1a;
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 0.9rem;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .config button:hover {
+        background: #42a5f5;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🌿 Environment Dashboard</h1>
+    <p class="subtitle">ESP32 · DHT11 + LDR · MQTT Live Monitor</p>
+    <div id="conn-status" class="disconnected">⚫ Disconnected</div>
+
+    <div class="cards">
+      <!-- Temperature -->
+      <div class="card">
+        <div class="icon">🌡️</div>
+        <div class="label">Temperature</div>
+        <div class="value" id="temp-value">--</div>
+        <div class="unit">°C</div>
+        <div class="gauge-wrap">
+          <div class="gauge-bar" id="temp-bar"></div>
+        </div>
+      </div>
+
+      <!-- Humidity -->
+      <div class="card">
+        <div class="icon">💧</div>
+        <div class="label">Humidity</div>
+        <div class="value" id="hum-value">--</div>
+        <div class="unit">%</div>
+        <div class="gauge-wrap"><div class="gauge-bar" id="hum-bar"></div></div>
+      </div>
+
+      <!-- Light -->
+      <div class="card">
+        <div class="icon">☀️</div>
+        <div class="label">Light (Raw)</div>
+        <div class="value" id="light-value">--</div>
+        <div class="unit">/ 4095</div>
+        <div class="gauge-wrap">
+          <div class="gauge-bar" id="light-bar"></div>
+        </div>
+      </div>
+
+      <!-- Day / Night -->
+      <div class="card">
+        <div class="icon">🌙</div>
+        <div class="label">Day / Night</div>
+        <div style="margin-top: 14px">
+          <span id="daynight-value" class="init">--</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="last-update">Last update: —</div>
+
+    <div class="log-title">📋 Message Log</div>
+    <div id="log"></div>
+
+    <div class="config">
+      <h3>⚙️ MQTT BROKER</h3>
+      <label>Broker Host</label>
+      <input id="cfg-host" type="text" value="test.mosquitto.org" />
+      <label>WebSocket Port</label>
+      <input id="cfg-port" type="number" value="8081" />
+      <button onclick="connect()">🔌 Connect</button>
+    </div>
+
+    <script>
+      let mqttClient = null;
+
+      const TOPICS = {
+        temperature: "home/environment/temperature",
+        humidity: "home/environment/humidity",
+        light: "home/environment/light",
+        daynight: "home/environment/daynight",
+        system: "home/system/status",
+      };
+
+      const ts = () => new Date().toLocaleTimeString();
+
+      function addLog(html) {
+        const log = document.getElementById("log");
+        const div = document.createElement("div");
+        div.className = "entry";
+        div.innerHTML = `<span class="time">${ts()}</span>${html}`;
+        log.prepend(div);
+      }
+
+      function setStatus(state, text) {
+        const el = document.getElementById("conn-status");
+        el.className = state;
+        el.textContent = text;
+      }
+
+      function connect() {
+        if (mqttClient) mqttClient.end(true);
+
+        const host = document.getElementById("cfg-host").value.trim();
+        const port = parseInt(document.getElementById("cfg-port").value);
+        const url = `wss://${host}:${port}/`;
+
+        setStatus("connecting", "🟡 Connecting...");
+        addLog(`<span class="sys">Connecting to ${url}</span>`);
+
+        mqttClient = mqtt.connect(url, {
+          clientId: "env_dashboard_" + Math.random().toString(16).substr(2, 6),
+          keepalive: 30,
+          reconnectPeriod: 3000,
+        });
+
+        mqttClient.on("connect", () => {
+          setStatus("connected", "🟢 Connected");
+          addLog(`<span class="sys">✅ Connected to broker</span>`);
+          mqttClient.subscribe(Object.values(TOPICS), (err) => {
+            if (!err)
+              addLog(
+                `<span class="sys">📡 Subscribed to all environment topics</span>`
+              );
+          });
+        });
+
+        mqttClient.on("reconnect", () =>
+          setStatus("connecting", "🟡 Reconnecting...")
+        );
+        mqttClient.on("offline", () => {
+          setStatus("disconnected", "⚫ Offline");
+          addLog(`<span class="sys">❌ Broker offline</span>`);
+        });
+        mqttClient.on("error", (err) => {
+          setStatus("disconnected", "🔴 Error");
+          addLog(`<span class="sys">⚠️ ${err.message}</span>`);
+        });
+
+        mqttClient.on("message", (topic, message) => {
+          const raw = message.toString().trim();
+          const now = new Date().toLocaleTimeString();
+
+          if (topic === TOPICS.temperature) {
+            const val = parseFloat(raw).toFixed(1);
+            document.getElementById("temp-value").textContent = val;
+            document.getElementById("temp-bar").style.width =
+              Math.min((val / 50) * 100, 100) + "%";
+            addLog(`<span class="temp">🌡️ Temperature: ${val} °C</span>`);
+          } else if (topic === TOPICS.humidity) {
+            const val = parseFloat(raw).toFixed(1);
+            document.getElementById("hum-value").textContent = val;
+            document.getElementById("hum-bar").style.width =
+              Math.min(val, 100) + "%";
+            addLog(`<span class="hum">💧 Humidity: ${val} %</span>`);
+          } else if (topic === TOPICS.light) {
+            const val = parseInt(raw);
+            document.getElementById("light-value").textContent = val;
+            document.getElementById("light-bar").style.width =
+              Math.min((val / 4095) * 100, 100) + "%";
+            addLog(`<span class="light">☀️ Light Raw: ${val}</span>`);
+          } else if (topic === TOPICS.daynight) {
+            const badge = document.getElementById("daynight-value");
+            badge.textContent = raw;
+            badge.className = raw;
+            addLog(
+              `<span class="dn">${
+                raw === "DAY" ? "☀️" : "🌙"
+              } State: ${raw}</span>`
+            );
+          } else if (topic === TOPICS.system) {
+            addLog(`<span class="sys">📟 System: ${raw}</span>`);
+          }
+
+          document.getElementById(
+            "last-update"
+          ).textContent = `Last update: ${now}`;
+        });
+      }
+
+      window.onload = connect;
+    </script>
+  </body>
+</html>

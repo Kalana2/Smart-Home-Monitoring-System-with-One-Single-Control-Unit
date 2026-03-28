@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Water Tank Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "Segoe UI", Arial, sans-serif;
+        background: #0f0f1a;
+        color: #e0e0e0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 40px 20px;
+      }
+
+      h1 {
+        font-size: 2rem;
+        color: #7eb8f7;
+        margin-bottom: 8px;
+        letter-spacing: 2px;
+      }
+
+      #conn-status {
+        font-size: 0.85rem;
+        padding: 5px 16px;
+        border-radius: 20px;
+        background: #1e1e2e;
+        border: 1px solid #333;
+        margin-bottom: 30px;
+      }
+      #conn-status.connected {
+        color: #4cff91;
+        border-color: #4cff91;
+      }
+      #conn-status.disconnected {
+        color: #ff5555;
+        border-color: #ff5555;
+      }
+
+      .cards {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        justify-content: center;
+        margin-bottom: 30px;
+      }
+
+      .card {
+        background: #1e1e2e;
+        border: 1px solid #2a2a3e;
+        border-radius: 14px;
+        padding: 24px 32px;
+        min-width: 160px;
+        text-align: center;
+      }
+      .card .label {
+        font-size: 0.8rem;
+        color: #888;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .card .value {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #7eb8f7;
+      }
+      .card .unit {
+        font-size: 0.85rem;
+        color: #aaa;
+        margin-top: 4px;
+      }
+
+      /* Tank visual */
+      .tank-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-bottom: 30px;
+      }
+      .tank-wrap h2 {
+        color: #7eb8f7;
+        margin-bottom: 14px;
+        font-size: 1rem;
+        letter-spacing: 1px;
+      }
+      .tank-outer {
+        width: 120px;
+        height: 220px;
+        border: 3px solid #4a90d9;
+        border-radius: 6px 6px 10px 10px;
+        position: relative;
+        overflow: hidden;
+        background: #111;
+      }
+      .tank-fill {
+        position: absolute;
+        bottom: 0;
+        width: 100%;
+        height: 0%;
+        background: linear-gradient(to top, #1a6fbf, #4fc3f7);
+        transition: height 0.8s ease, background 0.5s ease;
+      }
+      .tank-fill.full {
+        background: linear-gradient(to top, #1a6fbf, #4fc3f7);
+      }
+      .tank-fill.normal {
+        background: linear-gradient(to top, #1a8c4e, #4cff91);
+      }
+      .tank-fill.low {
+        background: linear-gradient(to top, #b87a00, #ffc107);
+      }
+      .tank-fill.critical {
+        background: linear-gradient(to top, #8b0000, #ff5555);
+      }
+      .tank-pct {
+        position: absolute;
+        width: 100%;
+        text-align: center;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 1.4rem;
+        font-weight: bold;
+        color: #fff;
+        text-shadow: 0 1px 4px #000;
+        z-index: 1;
+      }
+
+      /* Status badge */
+      #status-badge {
+        padding: 6px 22px;
+        border-radius: 20px;
+        font-size: 1rem;
+        font-weight: bold;
+        margin-top: 10px;
+        letter-spacing: 1px;
+        border: 2px solid #555;
+        background: #1e1e2e;
+        color: #aaa;
+      }
+      #status-badge.FULL {
+        color: #4fc3f7;
+        border-color: #4fc3f7;
+      }
+      #status-badge.NORMAL {
+        color: #4cff91;
+        border-color: #4cff91;
+      }
+      #status-badge.LOW {
+        color: #ffc107;
+        border-color: #ffc107;
+      }
+      #status-badge.CRITICAL {
+        color: #ff5555;
+        border-color: #ff5555;
+        animation: pulse 1s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      /* Log */
+      #log-box {
+        width: 100%;
+        max-width: 700px;
+        background: #1e1e2e;
+        border: 1px solid #2a2a3e;
+        border-radius: 10px;
+        padding: 16px;
+      }
+      #log-box h2 {
+        font-size: 0.85rem;
+        color: #888;
+        margin-bottom: 10px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      #log {
+        font-family: monospace;
+        font-size: 0.8rem;
+        color: #ccc;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      #log div {
+        padding: 3px 0;
+        border-bottom: 1px solid #2a2a3e;
+      }
+      #log div:last-child {
+        border-bottom: none;
+      }
+      .ts {
+        color: #555;
+        margin-right: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>💧 Water Tank Monitor</h1>
+    <div id="conn-status" class="disconnected">⚡ Disconnected</div>
+
+    <div class="tank-wrap">
+      <h2>TANK LEVEL</h2>
+      <div class="tank-outer">
+        <div class="tank-fill" id="tank-fill"></div>
+        <div class="tank-pct" id="tank-pct">--%</div>
+      </div>
+      <div id="status-badge">--</div>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="label">Distance</div>
+        <div class="value" id="val-dist">--</div>
+        <div class="unit">cm</div>
+      </div>
+      <div class="card">
+        <div class="label">Level</div>
+        <div class="value" id="val-level">--</div>
+        <div class="unit">cm</div>
+      </div>
+      <div class="card">
+        <div class="label">Percentage</div>
+        <div class="value" id="val-pct">--</div>
+        <div class="unit">%</div>
+      </div>
+      <div class="card">
+        <div class="label">Node</div>
+        <div class="value" style="font-size: 1rem" id="val-node">--</div>
+        <div class="unit">ID</div>
+      </div>
+    </div>
+
+    <div id="log-box">
+      <h2>📋 Message Log</h2>
+      <div id="log"></div>
+    </div>
+
+    <script>
+      const BROKER = "wss://test.mosquitto.org:8081";
+      const TOPICS = [
+        "home/watertank/level",
+        "home/watertank/distance",
+        "home/watertank/status",
+        "home/alerts/water",
+      ];
+
+      const client = mqtt.connect(BROKER, {
+        clientId: "web_" + Math.random().toString(16).slice(2),
+      });
+
+      const connStatus = document.getElementById("conn-status");
+
+      client.on("connect", () => {
+        connStatus.textContent = "✅ Connected to test.mosquitto.org";
+        connStatus.className = "connected";
+        TOPICS.forEach((t) => client.subscribe(t));
+        addLog("Connected & subscribed", "#4cff91");
+      });
+
+      client.on("error", (e) => {
+        connStatus.textContent = "❌ Error: " + e.message;
+        connStatus.className = "disconnected";
+      });
+
+      client.on("close", () => {
+        connStatus.textContent = "⚡ Disconnected";
+        connStatus.className = "disconnected";
+      });
+
+      client.on("message", (topic, message) => {
+        const raw = message.toString();
+        addLog(`[${topic}] ${raw}`);
+
+        if (topic === "home/watertank/level") {
+          try {
+            const d = JSON.parse(raw);
+            document.getElementById("val-dist").textContent =
+              d.distance_cm ?? "--";
+            document.getElementById("val-level").textContent =
+              d.level_cm ?? "--";
+            document.getElementById("val-pct").textContent =
+              d.percentage ?? "--";
+            document.getElementById("val-node").textContent = d.node_id ?? "--";
+
+            const pct = parseFloat(d.percentage) || 0;
+            const status = (d.status || "").toUpperCase();
+
+            const fill = document.getElementById("tank-fill");
+            const pctEl = document.getElementById("tank-pct");
+            const badge = document.getElementById("status-badge");
+
+            fill.style.height = pct + "%";
+            fill.className = "tank-fill " + status.toLowerCase();
+            pctEl.textContent = pct.toFixed(1) + "%";
+
+            badge.textContent = status || "--";
+            badge.className = status;
+          } catch (e) {
+            addLog("JSON parse error: " + e.message, "#ff5555");
+          }
+        }
+
+        if (topic === "home/watertank/distance") {
+          try {
+            const d = JSON.parse(raw);
+            document.getElementById("val-dist").textContent =
+              d.distance_cm ?? "--";
+          } catch (e) {}
+        }
+      });
+
+      function addLog(msg, color) {
+        const log = document.getElementById("log");
+        const div = document.createElement("div");
+        const now = new Date().toLocaleTimeString();
+        div.innerHTML = `<span class="ts">${now}</span>${msg}`;
+        if (color) div.style.color = color;
+        log.prepend(div);
+        while (log.children.length > 50) log.removeChild(log.lastChild);
+      }
+    </script>
+  </body>
+</html>
